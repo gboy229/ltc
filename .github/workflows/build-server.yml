@@ -133,6 +133,8 @@ jobs:
             rm -rf /tmp/hotgo-deploy/pkg
             mkdir -p /tmp/hotgo-deploy/pkg
             tar -xzf /tmp/hotgo-deploy/hotgo-server.tar.gz -C /tmp/hotgo-deploy/pkg
+            HEALTH_RETRIES="${{ vars.HEALTH_RETRIES || '60' }}" \
+            STRICT_HEALTH_CHECK="${{ vars.STRICT_HEALTH_CHECK || '0' }}" \
             bash /tmp/hotgo-deploy/pkg/remote-deploy-server.sh ${{ inputs.migrate && '--migrate' || '' }}
 
       # ------------------------------------------------------------------

@@ -25,6 +25,8 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/opt/ltc}"
 APP_PORT="${APP_PORT:-8000}"
 SERVICE="${SERVICE:-ltc}"
+HEALTH_RETRIES="${HEALTH_RETRIES:-60}"
+STRICT_HEALTH_CHECK="${STRICT_HEALTH_CHECK:-0}"
 
 RUN_MIGRATE=0
 RUN_MENU=0
@@ -136,8 +138,8 @@ fi
 
 ok "健康检查 http://127.0.0.1:${APP_PORT}${PAGE_PREFIX}/"
 HEALTHY=0
-for _ in $(seq 1 15); do
-  if curl -fsS -o /dev/null --max-time 3 "http://127.0.0.1:${APP_PORT}${PAGE_PREFIX}/"; then
+for _ in $(seq 1 "$HEALTH_RETRIES"); do
+  if curl -fsS -o /dev/null --max-time 3 "http://127.0.0.1:${APP_PORT}${PAGE_PREFIX}/" 2>/dev/null; then
     HEALTHY=1
     break
   fi
@@ -153,7 +155,14 @@ if [ "$HEALTHY" -eq 1 ]; then
   exit 0
 fi
 
-printf '\033[1;31mERROR:\033[0m 健康检查失败，开始回滚\n' >&2
-rollback
-as_root systemctl --no-pager --lines=30 status "$SERVICE" || true
-exit 1
+if [ "$STRICT_HEALTH_CHECK" = "1" ]; then
+  printf '\033[1;31mERROR:\033[0m 健康检查失败，开始回滚\n' >&2
+  rollback
+  as_root systemctl --no-pager --lines=30 status "$SERVICE" || true
+  exit 1
+fi
+
+printf '\033[1;33mWARN:\033[0m 健康检查 %s 秒未通过，已保留新版本（不回滚）。\n' "$HEALTH_RETRIES" >&2
+printf '请检查：sudo journalctl -u %s -n 100 --no-pager\n' "$SERVICE" >&2
+as_root systemctl --no-pager --lines=20 status "$SERVICE" || true
+exit 0

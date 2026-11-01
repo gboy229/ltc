@@ -348,6 +348,8 @@ sudo chmod 440 /etc/sudoers.d/ltc-deploy
 | Secret | `SSH_KEY` | ✅ | 私钥全文（建议 ed25519） |
 | Secret | `SSH_PORT` | 否 | 默认 22 |
 | Variable | `H5_CHECK_URL` | 否 | h5 健康检查地址，默认 `http://127.0.0.1/` |
+| Variable | `HEALTH_RETRIES` | 否 | 服务端健康检查等待秒数，默认 `60` |
+| Variable | `STRICT_HEALTH_CHECK` | 否 | `1` = 检查失败自动回滚；默认 `0` 只告警、保留新版本 |
 
 > 服务器上有多个 vhost 时，把 `H5_CHECK_URL` 设为真实域名（如 `https://example.com/`），否则健康检查可能命中别的站点。
 
@@ -398,7 +400,8 @@ sudo -u www-data ./main menu        # 菜单有变动时
 
 ### 3.8 回滚
 
-- 自动：服务端健康检查失败时，脚本自动把 `main` 恢复成 `main.prev` 并重启；
+- 默认：健康检查失败只告警，**保留新版本**，不会自动回滚；
+- 想要自动回滚：把仓库 Variable `STRICT_HEALTH_CHECK` 设为 `1`；
 - 手动：
 
 ```bash
@@ -457,13 +460,16 @@ sudo chown -R www-data:www-data /opt/ltc/{logs,storage,resource}
 
 h5 是 History 路由，必须在 nginx 配 `try_files $uri $uri/ /index.html;`。
 
+> h5 部署会保留 `.user.ini`、`.well-known`、`.htaccess`（宝塔等面板生成，`.user.ini` 常带 `chattr +i`），
+> 不会因为 `rsync --delete` 删不掉而失败。
+
 ### 4.7 自动部署失败
 
 先看 Actions 里失败的是哪一步：
 
 - **SSH/SCP 失败**：本机先手动 `ssh` 一次，确认密钥和端口；服务器安全组放行 SSH 端口；
 - **健康检查失败**：看日志 `sudo journalctl -u ltc -n 100 --no-pager`，以及 `/opt/ltc/logs/server/*.log`；
-  脚本会自动回滚到 `main.prev`，修好后重新 push 即可；
+  默认会保留新版本（只告警），修好后重新 push；想自动回滚就设 `STRICT_HEALTH_CHECK=1`；
 - **缺少配置**：确认 `/opt/ltc/manifest/config/config.yaml` 已存在、`ltc.service` 已安装；
 - **h5 健康检查失败**：确认 nginx 已配置 `root /opt/www/h5`，必要时设置变量 `H5_CHECK_URL`；
 - **迁移没跑**：CI 默认只更新二进制，表结构变更要手动 `cd /opt/ltc && sudo -u www-data ./main migrate`。

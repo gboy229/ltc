@@ -50,6 +50,15 @@ chown_app() {
   fi
 }
 
+# 保留面板/证书生成的文件（宝塔的 .user.ini 常带 chattr +i，删不掉）
+sync_h5() {
+  as_root rsync -a --delete --checksum \
+    --exclude='.user.ini' \
+    --exclude='.well-known' \
+    --exclude='.htaccess' \
+    "$1/" "$APP_DIR/"
+}
+
 if command -v flock >/dev/null 2>&1; then
   exec 9>/tmp/hotgo-h5-deploy.lock
   flock -n 9 || fail "已有 h5 部署正在进行"
@@ -65,7 +74,7 @@ if [ -d "$APP_DIR" ] && [ -n "$(ls -A "$APP_DIR" 2>/dev/null || true)" ]; then
 fi
 
 ok "同步 h5 到 $APP_DIR"
-as_root rsync -a --delete --checksum "$SRC_DIR/" "$APP_DIR/"
+sync_h5 "$SRC_DIR"
 chown_app
 
 ok "健康检查 $CHECK_URL"
@@ -77,8 +86,7 @@ fi
 
 printf '\033[1;31mERROR:\033[0m h5 健康检查失败，开始回滚\n' >&2
 if [ -d "$BACKUP" ]; then
-  as_root rm -rf "$APP_DIR"
-  as_root mv "$BACKUP" "$APP_DIR"
+  sync_h5 "$BACKUP"
   chown_app
   echo "已回滚到上一版 h5" >&2
 else
