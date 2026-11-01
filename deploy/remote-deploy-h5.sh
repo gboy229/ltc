@@ -37,6 +37,19 @@ else
   as_root() { sudo -n "$@"; }
 fi
 
+# 以 nginx 实际运行用户为准（www-data / nginx / www 等），也可用 APP_USER 覆盖
+APP_USER="${APP_USER:-}"
+if [ -z "$APP_USER" ] && command -v nginx >/dev/null 2>&1; then
+  APP_USER="$(nginx -T 2>/dev/null | awk '/^[[:space:]]*user[[:space:]]/{print $2; exit}' | tr -d ';' || true)"
+fi
+APP_USER="${APP_USER:-www-data}"
+
+chown_app() {
+  if id "$APP_USER" >/dev/null 2>&1; then
+    as_root chown -R "$APP_USER" "$APP_DIR" 2>/dev/null || true
+  fi
+}
+
 if command -v flock >/dev/null 2>&1; then
   exec 9>/tmp/hotgo-h5-deploy.lock
   flock -n 9 || fail "已有 h5 部署正在进行"
@@ -53,7 +66,7 @@ fi
 
 ok "同步 h5 到 $APP_DIR"
 as_root rsync -a --delete --checksum "$SRC_DIR/" "$APP_DIR/"
-as_root chown -R www-data:www-data "$APP_DIR" 2>/dev/null || true
+chown_app
 
 ok "健康检查 $CHECK_URL"
 if curl -fsS -o /dev/null --max-time 5 "$CHECK_URL"; then
@@ -66,7 +79,7 @@ printf '\033[1;31mERROR:\033[0m h5 健康检查失败，开始回滚\n' >&2
 if [ -d "$BACKUP" ]; then
   as_root rm -rf "$APP_DIR"
   as_root mv "$BACKUP" "$APP_DIR"
-  as_root chown -R www-data:www-data "$APP_DIR" 2>/dev/null || true
+  chown_app
   echo "已回滚到上一版 h5" >&2
 else
   echo "没有可回滚的备份（首次部署），保留已上传文件，请检查 nginx 配置" >&2

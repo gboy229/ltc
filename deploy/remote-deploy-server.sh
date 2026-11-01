@@ -72,12 +72,22 @@ if command -v systemctl >/dev/null 2>&1; then
   fi
 fi
 
+# 以服务实际运行用户为准（www-data / nginx / www 等）
+APP_USER="$(systemctl show "$SERVICE" -p User --value 2>/dev/null || true)"
+[ -n "$APP_USER" ] || APP_USER="root"
+
+chown_app() {
+  if id "$APP_USER" >/dev/null 2>&1; then
+    as_root chown "$APP_USER" "$1" 2>/dev/null || true
+  fi
+}
+
 rollback() {
   if [ -f "$APP_DIR/main.prev" ]; then
     as_root cp -f "$APP_DIR/main.prev" "$APP_DIR/main.new"
     as_root chmod 0755 "$APP_DIR/main.new"
     as_root mv -f "$APP_DIR/main.new" "$APP_DIR/main"
-    as_root chown www-data:www-data "$APP_DIR/main" 2>/dev/null || true
+    chown_app "$APP_DIR/main"
     as_root systemctl restart "$SERVICE" || true
     echo "已回滚到 main.prev" >&2
   else
@@ -114,7 +124,7 @@ ok "切换二进制"
 as_root cp -f "$SRC_DIR/main" "$APP_DIR/main.new"
 as_root chmod 0755 "$APP_DIR/main.new"
 as_root mv -f "$APP_DIR/main.new" "$APP_DIR/main"
-as_root chown www-data:www-data "$APP_DIR/main" 2>/dev/null || true
+chown_app "$APP_DIR/main"
 
 ok "重启服务"
 if ! as_root systemctl restart "$SERVICE"; then
@@ -138,7 +148,7 @@ if [ "$HEALTHY" -eq 1 ]; then
   ok "部署成功：${PAGE_PREFIX}/"
   if [ "$RUN_MIGRATE" != "1" ]; then
     printf '提示：本次未执行数据库迁移。如版本包含表结构变更，请手动执行：\n'
-    printf '  cd %s && sudo -u www-data ./main migrate\n' "$APP_DIR"
+    printf '  cd %s && sudo -u %s ./main migrate\n' "$APP_DIR" "$APP_USER"
   fi
   exit 0
 fi

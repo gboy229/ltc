@@ -334,6 +334,9 @@ echo 'ubuntu ALL=(ALL) NOPASSWD: ALL' | sudo tee /etc/sudoers.d/ltc-deploy
 sudo chmod 440 /etc/sudoers.d/ltc-deploy
 ```
 
+> 部署脚本会自动读取 `ltc.service` 的 `User=` 和 nginx 的 `user` 指令，把 `/opt/ltc/main`、`/opt/www/h5`
+> 的属主改成实际运行用户。服务器用 `nginx` / `www` 时，记得同步改 `ltc.service` 的 `User=` / `Group=`。
+
 ### 3.4 Secrets / Variables
 
 仓库 **Settings → Secrets and variables → Actions**：
@@ -465,7 +468,24 @@ h5 是 History 路由，必须在 nginx 配 `try_files $uri $uri/ /index.html;`�
 - **h5 健康检查失败**：确认 nginx 已配置 `root /opt/www/h5`，必要时设置变量 `H5_CHECK_URL`；
 - **迁移没跑**：CI 默认只更新二进制，表结构变更要手动 `cd /opt/ltc && sudo -u www-data ./main migrate`。
 
-### 4.8 编译报 Go 缓存目录没有权限
+### 4.8 服务启动失败：status=217/USER
+
+`ltc.service` 里的 `User=www-data` 在服务器上不存在（CentOS / 宝塔面板常见，用户是 `nginx` 或 `www`）。
+
+```bash
+id nginx
+id www
+```
+
+把 `/etc/systemd/system/ltc.service` 里的 `User=` / `Group=` 改成实际用户，然后：
+
+```bash
+sudo chown -R <用户>:<用户> /opt/ltc/{logs,storage,resource} /opt/ltc/main
+sudo systemctl daemon-reload
+sudo systemctl restart ltc
+```
+
+### 4.9 编译报 Go 缓存目录没有权限
 
 错误类似：
 
@@ -481,7 +501,21 @@ GOCACHE="$PWD/.cache/go-build" ./deploy/build.sh
 
 `.cache/` 已加入 `.gitignore`。普通本机终端直接 `./deploy/build.sh` 即可，不需要这一步。
 
-### 4.9 报 `BUILD_LABEL: unbound variable`
+### 4.10 在线安装插件成功，但没有建表
+
+插件建表的 SQL 已经通过 `go:embed` 打进二进制（[server/addons/embed.go](../server/addons/embed.go)），程序优先从内嵌文件读取，不再依赖服务器上的 `addons/` 目录。
+
+如果仍然没建表：
+
+1. 确认跑的是新构建的二进制（push 后 CI 会重新打包）；
+2. 到后台把插件**卸载再安装**，迁移才会重新执行；
+3. 旧部署可能在服务器留有 `/opt/ltc/addons`，可以删掉（新代码优先用内嵌 SQL）。
+
+> 插件建表 SQL 使用 `CREATE TABLE IF NOT EXISTS`，重复执行安全。
+> 新增插件或修改 SQL 后，生产环境必须重新构建二进制才会生效。
+> 开发模式（`system.mode: develop`）下如果仓库有 `addons/` 目录，会优先读磁盘，改 SQL 立即生效；生产模式（`product`）读内嵌 SQL。
+
+### 4.11 报 `BUILD_LABEL: unbound variable`
 
 macOS 自带的是 bash 3.2，在 UTF-8 locale 下，`$VAR` 后面紧跟中文全角标点（如 `（`、`）`、`，`）时，会把标点字节当成变量名的一部分，于是报 `unbound variable`。
 

@@ -7,6 +7,10 @@ package addons
 
 import (
 	"context"
+	"io/fs"
+	"path"
+
+	addonsFS "hotgo/addons"
 	"hotgo/internal/consts"
 	"hotgo/internal/dao"
 	"hotgo/internal/library/migrate"
@@ -141,9 +145,23 @@ func UnInstall(m Module) (err error) {
 	})
 }
 
-// migrateUp 执行插件结构迁移（建表），SQL 使用 CREATE TABLE IF NOT EXISTS 保证幂等，无需版本号
+// isDevelopMode 是否为开发模式（只有 develop 才允许磁盘优先，product 使用内嵌 SQL）
+func isDevelopMode(ctx context.Context) bool {
+	return g.Cfg().MustGet(ctx, "system.mode", "develop").String() == "develop"
+}
+
+// migrateUp 执行插件结构迁移（建表），SQL 使用 CREATE TABLE IF NOT EXISTS 保证幂等，无需版本号。
+// 开发模式下优先读磁盘，改 SQL 不用重新编译；生产模式优先读二进制内嵌 SQL。
 func migrateUp(ctx context.Context, name string) (err error) {
 	dir := gfile.Join("addons", name, "migrations")
+	if isDevelopMode(ctx) && gfile.Exists(dir) {
+		return migrate.Seed(ctx, dir)
+	}
+
+	sub := path.Join(name, "migrations")
+	if _, statErr := fs.Stat(addonsFS.SQLFS, sub); statErr == nil {
+		return migrate.SeedFS(ctx, addonsFS.SQLFS, sub)
+	}
 	if !gfile.Exists(dir) {
 		return nil
 	}
@@ -153,6 +171,14 @@ func migrateUp(ctx context.Context, name string) (err error) {
 // migrateSeed 执行插件数据填充（种子），SQL 幂等
 func migrateSeed(ctx context.Context, name string) (err error) {
 	dir := gfile.Join("addons", name, "seeders")
+	if isDevelopMode(ctx) && gfile.Exists(dir) {
+		return migrate.Seed(ctx, dir)
+	}
+
+	sub := path.Join(name, "seeders")
+	if _, statErr := fs.Stat(addonsFS.SQLFS, sub); statErr == nil {
+		return migrate.SeedFS(ctx, addonsFS.SQLFS, sub)
+	}
 	if !gfile.Exists(dir) {
 		return nil
 	}

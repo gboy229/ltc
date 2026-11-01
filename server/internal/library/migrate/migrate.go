@@ -8,6 +8,9 @@ package migrate
 
 import (
 	"context"
+	"errors"
+	"io/fs"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -232,6 +235,44 @@ func Seed(ctx context.Context, dir string) (err error) {
 			return gerror.Wrapf(err, "填充数据失败: %s", gfile.Basename(f))
 		}
 		g.Log().Infof(ctx, "填充数据成功: %s", gfile.Basename(f))
+	}
+	return
+}
+
+// SeedFS 从 fs.FS 执行 SQL，用于内嵌在二进制中的插件 migrations/seeders。
+// 目录不存在时返回 nil，方便插件没有对应目录时直接跳过。
+func SeedFS(ctx context.Context, fsys fs.FS, dir string) (err error) {
+	entries, err := fs.ReadDir(fsys, dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return
+	}
+
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		names = append(names, entry.Name())
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		filePath := path.Join(dir, name)
+		sql, readErr := fs.ReadFile(fsys, filePath)
+		if readErr != nil {
+			return readErr
+		}
+		if strings.TrimSpace(string(sql)) == "" {
+			g.Log().Warningf(ctx, "种子文件为空，跳过: %s", filePath)
+			continue
+		}
+		if err = execScript(ctx, string(sql)); err != nil {
+			return gerror.Wrapf(err, "填充数据失败: %s", name)
+		}
+		g.Log().Infof(ctx, "填充数据成功: %s", name)
 	}
 	return
 }
