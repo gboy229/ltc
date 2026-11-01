@@ -33,6 +33,7 @@ if [ "$(id -u)" -eq 0 ]; then
   as_root() { "$@"; }
 else
   command -v sudo >/dev/null 2>&1 || fail "当前用户非 root 且没有 sudo"
+  sudo -n true 2>/dev/null || fail "当前用户没有免密 sudo，请改用 root 部署，或给该用户配置 NOPASSWD"
   as_root() { sudo -n "$@"; }
 fi
 
@@ -41,30 +42,30 @@ if command -v flock >/dev/null 2>&1; then
   flock -n 9 || fail "已有 h5 部署正在进行"
 fi
 
-mkdir -p "$APP_DIR"
+as_root mkdir -p "$APP_DIR"
 
 BACKUP="/tmp/h5-backup.$$"
-rm -rf "$BACKUP"
+as_root rm -rf "$BACKUP"
 if [ -d "$APP_DIR" ] && [ -n "$(ls -A "$APP_DIR" 2>/dev/null || true)" ]; then
   ok "备份当前 h5 到 $BACKUP"
-  cp -a "$APP_DIR" "$BACKUP"
+  as_root cp -a "$APP_DIR" "$BACKUP"
 fi
 
 ok "同步 h5 到 $APP_DIR"
-rsync -a --delete --checksum "$SRC_DIR/" "$APP_DIR/"
+as_root rsync -a --delete --checksum "$SRC_DIR/" "$APP_DIR/"
 as_root chown -R www-data:www-data "$APP_DIR" 2>/dev/null || true
 
 ok "健康检查 $CHECK_URL"
 if curl -fsS -o /dev/null --max-time 5 "$CHECK_URL"; then
-  rm -rf "$BACKUP"
+  as_root rm -rf "$BACKUP"
   ok "h5 部署成功"
   exit 0
 fi
 
 printf '\033[1;31mERROR:\033[0m h5 健康检查失败，开始回滚\n' >&2
 if [ -d "$BACKUP" ]; then
-  rm -rf "$APP_DIR"
-  mv "$BACKUP" "$APP_DIR"
+  as_root rm -rf "$APP_DIR"
+  as_root mv "$BACKUP" "$APP_DIR"
   as_root chown -R www-data:www-data "$APP_DIR" 2>/dev/null || true
   echo "已回滚到上一版 h5" >&2
 else

@@ -59,6 +59,7 @@ if [ "$(id -u)" -eq 0 ]; then
   as_root() { "$@"; }
 else
   command -v sudo >/dev/null 2>&1 || fail "当前用户非 root 且没有 sudo"
+  sudo -n true 2>/dev/null || fail "当前用户没有免密 sudo，请改用 root 部署，或给该用户配置 NOPASSWD"
   as_root() { sudo -n "$@"; }
 fi
 
@@ -73,10 +74,10 @@ fi
 
 rollback() {
   if [ -f "$APP_DIR/main.prev" ]; then
-    cp -f "$APP_DIR/main.prev" "$APP_DIR/main.new"
-    chmod 0755 "$APP_DIR/main.new"
-    mv -f "$APP_DIR/main.new" "$APP_DIR/main"
-    chown www-data:www-data "$APP_DIR/main" 2>/dev/null || true
+    as_root cp -f "$APP_DIR/main.prev" "$APP_DIR/main.new"
+    as_root chmod 0755 "$APP_DIR/main.new"
+    as_root mv -f "$APP_DIR/main.new" "$APP_DIR/main"
+    as_root chown www-data:www-data "$APP_DIR/main" 2>/dev/null || true
     as_root systemctl restart "$SERVICE" || true
     echo "已回滚到 main.prev" >&2
   else
@@ -91,9 +92,9 @@ if command -v flock >/dev/null 2>&1; then
 fi
 
 ok "同步 manifest（保留 config.yaml）"
-rsync -a --checksum --exclude 'config/config.yaml' "$SRC_DIR/manifest/" "$APP_DIR/manifest/"
+as_root rsync -a --checksum --exclude 'config/config.yaml' "$SRC_DIR/manifest/" "$APP_DIR/manifest/"
 
-chmod 0755 "$SRC_DIR/main"
+as_root chmod 0755 "$SRC_DIR/main"
 
 if [ "$RUN_MIGRATE" = "1" ]; then
   ok "执行数据库迁移（手动触发）"
@@ -106,14 +107,14 @@ fi
 
 ok "备份当前二进制到 main.prev"
 if [ -f "$APP_DIR/main" ]; then
-  cp -f "$APP_DIR/main" "$APP_DIR/main.prev"
+  as_root cp -f "$APP_DIR/main" "$APP_DIR/main.prev"
 fi
 
 ok "切换二进制"
-cp -f "$SRC_DIR/main" "$APP_DIR/main.new"
-chmod 0755 "$APP_DIR/main.new"
-mv -f "$APP_DIR/main.new" "$APP_DIR/main"
-chown www-data:www-data "$APP_DIR/main" 2>/dev/null || true
+as_root cp -f "$SRC_DIR/main" "$APP_DIR/main.new"
+as_root chmod 0755 "$APP_DIR/main.new"
+as_root mv -f "$APP_DIR/main.new" "$APP_DIR/main"
+as_root chown www-data:www-data "$APP_DIR/main" 2>/dev/null || true
 
 ok "重启服务"
 if ! as_root systemctl restart "$SERVICE"; then

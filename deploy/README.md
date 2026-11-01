@@ -317,19 +317,22 @@ GitHub Free 的 **制品（artifact）额度只有 500MB**，而且和 Packages 
 **推荐 root**：本项目是单机部署，部署动作要同时写 `/opt/ltc`、`/opt/www/h5` 并执行 `systemctl`，用普通用户要配三处权限，收益有限。
 务必使用**专用密钥**（只给这个仓库、可随时吊销），不要复用个人密钥。
 
-如果要用普通用户（更安全），脚本已兼容（自动判断 root / `sudo -n`），一次性配置：
+如果 `SSH_USER` 不是 root（例如云主机默认的 `ubuntu`），该用户必须能**免密 sudo**：脚本会用 `sudo` 写 `/opt/ltc`、`/opt/www/h5` 并执行 `systemctl`。
 
 ```bash
-sudo useradd -m -s /bin/bash deployer
-sudo usermod -aG www-data deployer
-sudo chown -R deployer:www-data /opt/ltc /opt/www/h5
-sudo chmod -R g+w /opt/ltc /opt/www/h5
-echo 'deployer ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart ltc, /usr/bin/systemctl status ltc' \
-  | sudo tee /etc/sudoers.d/ltc-deploy
-sudo chmod 440 /etc/sudoers.d/ltc-deploy
+# 在服务器上确认（有输出就说明可以）
+sudo -n true && echo "有免密 sudo"
 ```
 
-> 用普通用户时，`/opt/www/h5` 必须先建好并归 `deployer` 所有，否则首次发布无法写入。
+没有免密 sudo 的话，二选一：
+
+- 改用 `SSH_USER=root`（推荐，最省事）；
+- 给部署用户配置免密 sudo（注意这等价于 root 权限）：
+
+```bash
+echo 'ubuntu ALL=(ALL) NOPASSWD: ALL' | sudo tee /etc/sudoers.d/ltc-deploy
+sudo chmod 440 /etc/sudoers.d/ltc-deploy
+```
 
 ### 3.4 Secrets / Variables
 
