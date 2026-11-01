@@ -1,0 +1,89 @@
+name: deploy-h5
+
+# 只有 h5/ 有改动时才构建并发布移动端，不重启 Go 服务。
+# Go 服务的部署见 deploy-server.yml。
+#
+# 构建和发布在同一个 job 内完成，不产生 Actions artifact。
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "h5/**"
+      - "!h5/**/*.md"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-h5-master
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检查部署 Secrets
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          [ -n "$SSH_HOST" ] || { echo "::error::缺少 Secret SSH_HOST"; exit 1; }
+          [ -n "$SSH_USER" ] || { echo "::error::缺少 Secret SSH_USER"; exit 1; }
+          [ -n "$SSH_KEY" ]  || { echo "::error::缺少 Secret SSH_KEY"; exit 1; }
+
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: h5/pnpm-lock.yaml
+
+      - name: 构建 h5
+        working-directory: h5
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+          test -f dist/index.html
+          du -sh dist
+
+      - name: 打部署包
+        run: |
+          rm -rf package-h5
+          mkdir -p package-h5/dist
+          cp -R h5/dist/. package-h5/dist/
+          cp deploy/remote-deploy-h5.sh package-h5/
+          tar -C package-h5 -czf h5-dist.tar.gz .
+          ls -lh h5-dist.tar.gz
+
+      - name: 上传 h5 部署包
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          source: h5-dist.tar.gz
+          target: /tmp/hotgo-h5-deploy
+          overwrite: true
+
+      - name: 解包、替换、健康检查
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          command_timeout: 5m
+          script: |
+            set -eu
+            rm -rf /tmp/hotgo-h5-deploy/pkg
+            mkdir -p /tmp/hotgo-h5-deploy/pkg
+            tar -xzf /tmp/hotgo-h5-deploy/h5-dist.tar.gz -C /tmp/hotgo-h5-deploy/pkg
+            H5_CHECK_URL="${{ vars.H5_CHECK_URL || 'http://127.0.0.1/' }}" \
+              bash /tmp/hotgo-h5-deploy/pkg/remote-deploy-h5.sh

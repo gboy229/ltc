@@ -1,0 +1,19 @@
+[Unit]
+Description=LTC server
+After=network.target mysql.service redis-server.service
+
+[Service]
+Type=simple
+# 如果服务器上没有 www-data（CentOS 常见），改成 nginx 或 nobody，并同步 chown 目录
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/ltc
+ExecStart=/opt/ltc/main
+Restart=always
+RestartSec=5
+LimitNOFILE=65535
+# 敏感配置走环境变量，不写进 config.yaml
+EnvironmentFile=-/opt/ltc/.env
+
+[Install]
+WantedBy=multi-user.target

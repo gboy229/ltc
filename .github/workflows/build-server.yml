@@ -1,0 +1,145 @@
+name: build-server
+
+# 构建后台前端 + Go 单文件二进制，可选直接部署或发 Release。
+#
+# 重要：编译和部署在同一个 job 里完成，**不生成 Actions artifact**。
+# 80MB 的二进制只在 runner 本地存在，直接 scp 到服务器，
+# 不占 GitHub Free 的 500MB 制品存储（存 artifact 的话十几次就会满）。
+
+on:
+  workflow_call:
+    inputs:
+      deploy:
+        description: 构建后是否部署到服务器
+        type: boolean
+        default: false
+      migrate:
+        description: 部署时是否执行数据库迁移
+        type: boolean
+        default: false
+      release:
+        description: 构建后是否创建 GitHub Release
+        type: boolean
+        default: false
+    secrets:
+      SSH_HOST:
+        required: false
+      SSH_USER:
+        required: false
+      SSH_KEY:
+        required: false
+      SSH_PORT:
+        required: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: server/go.sum
+
+      # 版本与 server/go.mod 对齐，避免 gf CLI 与项目框架版本不一致
+      - name: 安装 gf CLI
+        run: |
+          GOBIN="$HOME/go/bin" go install github.com/gogf/gf/cmd/gf/v2@v2.10.3
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          "$HOME/go/bin/gf" -v
+
+      - name: 读取页面前缀
+        id: prefix
+        run: |
+          PREFIX=$(sed -n 's/^[[:space:]]*VITE_PUBLIC_PATH=//p' web/.env.production | tail -1 | tr -d '\r')
+          PREFIX="${PREFIX:-/admin}"
+          PREFIX="/${PREFIX#/}"
+          PREFIX="${PREFIX%/}"
+          echo "page_prefix=$PREFIX" >> "$GITHUB_OUTPUT"
+          echo "页面前缀：$PREFIX"
+
+      - name: 构建（前端 + 单文件二进制）
+        run: |
+          cd server && go mod download && cd ..
+          chmod +x deploy/build.sh
+          ./deploy/build.sh
+          ls -lh server/temp/hotgo
+
+      - name: 打部署包
+        run: |
+          rm -rf package
+          mkdir -p package/manifest
+          cp server/temp/hotgo package/main
+          cp -R server/manifest/config     package/manifest/
+          cp -R server/manifest/i18n       package/manifest/
+          cp -R server/manifest/migrations package/manifest/
+          cp -R server/manifest/seeders    package/manifest/
+          # 生产配置不入包，由服务器自行维护
+          rm -f package/manifest/config/config.yaml
+          cp deploy/remote-deploy-server.sh package/
+          echo "${{ steps.prefix.outputs.page_prefix }}" > package/page-prefix.txt
+          tar -C package -czf hotgo-server.tar.gz .
+          ls -lh hotgo-server.tar.gz
+
+      # ------------------------------------------------------------------
+      # 部署（可选）
+      # ------------------------------------------------------------------
+      - name: 检查部署 Secrets
+        if: inputs.deploy
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          [ -n "$SSH_HOST" ] || { echo "::error::缺少 Secret SSH_HOST"; exit 1; }
+          [ -n "$SSH_USER" ] || { echo "::error::缺少 Secret SSH_USER"; exit 1; }
+          [ -n "$SSH_KEY" ]  || { echo "::error::缺少 Secret SSH_KEY"; exit 1; }
+
+      - name: 上传部署包
+        if: inputs.deploy
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          source: hotgo-server.tar.gz
+          target: /tmp/hotgo-deploy
+          overwrite: true
+
+      - name: 解包、切换、重启、健康检查
+        if: inputs.deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          command_timeout: 10m
+          script: |
+            set -eu
+            rm -rf /tmp/hotgo-deploy/pkg
+            mkdir -p /tmp/hotgo-deploy/pkg
+            tar -xzf /tmp/hotgo-deploy/hotgo-server.tar.gz -C /tmp/hotgo-deploy/pkg
+            bash /tmp/hotgo-deploy/pkg/remote-deploy-server.sh ${{ inputs.migrate && '--migrate' || '' }}
+
+      # ------------------------------------------------------------------
+      # 发布 Release（可选，打 tag 时）
+      # ------------------------------------------------------------------
+      - name: 发布 Release
+        if: inputs.release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: hotgo-server.tar.gz

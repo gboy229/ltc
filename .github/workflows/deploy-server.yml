@@ -1,0 +1,36 @@
+name: deploy-server
+
+# server/ 或 web/ 有改动时：构建 → 上传 → 切换二进制 → 重启 → 健康检查
+# web 改动也会触发：后台页面会被打进 Go 二进制，必须一起重新构建。
+# 只改 h5 时不会触发本工作流（见 deploy-h5.yml）。
+#
+# 构建和部署在同一个 job 内完成，不产生 Actions artifact，不占制品存储。
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "server/**"
+      - "web/**"
+      - "deploy/build.sh"
+      - "deploy/remote-deploy-server.sh"
+      - "!**/*.md"
+  workflow_dispatch:
+    inputs:
+      migrate:
+        description: "部署完成后执行数据库迁移（默认关闭，建议手动迁移）"
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-server-master
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/master'
+    uses: ./.github/workflows/build-server.yml
+    secrets: inherit
+    with:
+      deploy: true
+      migrate: ${{ github.event.inputs.migrate == 'true' }}

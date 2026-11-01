@@ -1,0 +1,17 @@
+name: release
+
+# 打 tag 时：构建服务端并生成 GitHub Release（可下载历史版本），不部署。
+# 构建和发布在同一个 job 内完成，不产生 Actions artifact。
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: ./.github/workflows/build-server.yml
+    with:
+      release: true

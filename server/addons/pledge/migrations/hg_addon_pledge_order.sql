@@ -1,0 +1,25 @@
+-- 支付确认后的正式订单
+CREATE TABLE IF NOT EXISTS `hg_addon_pledge_order` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `order_no` varchar(32) NOT NULL DEFAULT '' COMMENT '订单号（与报单号一致）',
+  `user_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT '用户ID',
+  `plan_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT '套餐ID',
+  `amount` decimal(20,2) NOT NULL DEFAULT '0.00' COMMENT '订单金额',
+  `period_months` int NOT NULL DEFAULT '0' COMMENT '投资周期（月）',
+  `today_income` decimal(20,4) NOT NULL DEFAULT '0.0000' COMMENT '今天收益',
+  `inc_income` decimal(20,4) NOT NULL DEFAULT '0.0000' COMMENT '累计收益',
+  `cycle_num` int NOT NULL DEFAULT '0' COMMENT '总天数',
+  `inc_income_num` int NOT NULL DEFAULT '0' COMMENT '累计收益次数',
+  `early_exit_penalty_rate` decimal(10,4) NOT NULL DEFAULT '0.0000' COMMENT '提前退本违约金比例（%）',
+  `recharge_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT '关联充值记录ID',
+  `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '状态：1=进行中，2=已完成',
+  `is_early_refund` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否提前退本：0=否，1=是',
+  `settle_at` datetime DEFAULT NULL COMMENT '最后结算时间',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_order_no` (`order_no`),
+  UNIQUE KEY `uk_recharge_id` (`recharge_id`),
+  KEY `idx_user_status` (`user_id`,`status`),
+  KEY `idx_status_settle` (`status`,`settle_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='质押正式订单表';

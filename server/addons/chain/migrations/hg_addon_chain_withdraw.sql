@@ -1,0 +1,28 @@
+-- 链提现表
+CREATE TABLE IF NOT EXISTS `hg_addon_chain_withdraw` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `uid` int NOT NULL DEFAULT 0 COMMENT '用户ID',
+  `chain` varchar(30) NOT NULL COMMENT '链',
+  `symbol` varchar(30) DEFAULT NULL COMMENT '币种',
+  `contract_address` varchar(100) NOT NULL COMMENT '合约地址',
+  `from_address` varchar(100) NOT NULL COMMENT '转出地址',
+  `to_address` varchar(100) NOT NULL COMMENT '转入地址',
+  `pay_amount` decimal(20,4) NOT NULL COMMENT '付款数量，含手续费',
+  `receive_amount` decimal(20,4) NOT NULL COMMENT '收款数量',
+  `fee` decimal(10,4) NOT NULL DEFAULT 0.0000 COMMENT '手续费',
+  `rate` decimal(10,4) NOT NULL DEFAULT 0.0000 COMMENT '手续费费率',
+  `hash` varchar(100) DEFAULT NULL COMMENT '哈希',
+  `status` tinyint NOT NULL DEFAULT 0 COMMENT '状态，0=审核中，1=已审核，2=已打币，3=失败，4=完成，-1=取消',
+  `version` int NOT NULL DEFAULT 0 COMMENT '乐观锁',
+  `audit_by` bigint NOT NULL DEFAULT 0 COMMENT '审核人ID',
+  `audit_at` datetime DEFAULT NULL COMMENT '审核时间',
+  `remark` varchar(255) NOT NULL DEFAULT '' COMMENT '审核备注',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`) USING BTREE,
+  KEY `chain_withdraw_uid_index` (`uid`) USING BTREE,
+  KEY `chain_withdraw_contract_address_index` (`contract_address`) USING BTREE,
+  KEY `chain_withdraw_from_address_index` (`from_address`) USING BTREE,
+  KEY `chain_withdraw_to_address_index` (`to_address`) USING BTREE,
+  KEY `chain_withdraw_created_at_index` (`created_at`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='区块提币';

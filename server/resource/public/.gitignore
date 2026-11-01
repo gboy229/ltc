@@ -1,0 +1,6 @@
+attachment/
+admin/
+.well-known/pki-validation
+
+# 构建产物目录（deploy/build.sh 按 VITE_PUBLIC_PATH 生成），不入库
+/mMe6PXqfRLhjWCiK/

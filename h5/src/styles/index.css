@@ -1,0 +1,125 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply min-h-screen bg-[#e9ddca] font-sans text-ink-900 antialiased;
+    overscroll-behavior-y: none;
+  }
+
+  #app {
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  body.h5-nav-open,
+  body.h5-buy-open,
+  body.h5-refund-open {
+    overflow: hidden;
+  }
+}
+
+@layer components {
+  /* PC 端手机画布：400px 宽（375 设计宽 × 1.0667），内容等比放大，页面纵向滚动 */
+  .h5-viewport {
+    @apply flex min-h-screen w-full justify-center;
+  }
+
+  .h5-frame {
+    width: 100%;
+  }
+
+  .h5-shell {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow: hidden;
+    background-color: #fdf9ef;
+    background-image: url('../assets/images/bg.png');
+    background-position: top center;
+    background-repeat: no-repeat;
+    background-size: cover;
+  }
+
+  @media (min-width: 768px) {
+    .h5-viewport {
+      @apply items-start p-6;
+    }
+
+    .h5-frame {
+      position: relative;
+      flex: none;
+    }
+
+    .h5-shell {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 375px;
+      height: auto;
+      min-height: 877px;
+      transform-origin: top left;
+      border-radius: 28px;
+    }
+  }
+}
+
+@layer utilities {
+  /* 安全区域：iPhone 刘海屏 / 底部 Home 指示条 */
+  .pt-safe {
+    padding-top: 0;
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .pb-safe {
+    padding-bottom: 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* 移动端全屏高度，兼容不支持 dvh 的浏览器 */
+  .min-h-app {
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+}
+
+/* 页面切换过渡 */
+.page-enter-active,
+.page-leave-active {
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+}
+
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.page-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

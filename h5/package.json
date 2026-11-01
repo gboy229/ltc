@@ -1,0 +1,44 @@
+{
+  "name": "hotgo-h5",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "HotGo 移动端 H5（Vue 3 + Vite + TypeScript + Tailwind CSS）",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "axios": "^1.21.0",
+    "pinia": "^3.0.4",
+    "vue": "^3.5.44",
+    "vue-router": "^4.6.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@vitejs/plugin-vue": "^6.0.10",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.19",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.7",
+    "vue-tsc": "^3.3.13"
+  },
+  "browserslist": [
+    "> 0.5%",
+    "last 2 versions",
+    "iOS >= 12",
+    "Android >= 6",
+    "not dead"
+  ],
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}
