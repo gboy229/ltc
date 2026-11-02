@@ -329,6 +329,13 @@ func (s *sOrder) HandlePayment(ctx context.Context, event *mainmodel.ChainPaymen
 	}
 
 	orderCols := dao.PledgeOrder.Columns()
+
+	// 正式订单金额 = 报单金额 × 配置数量，未配置时默认 1
+	quantity := g.Cfg().MustGet(ctx, "pledge.quantity", 1).Float64()
+	if quantity <= 0 {
+		quantity = 1
+	}
+
 	exist, err := dao.PledgeOrder.Ctx(ctx).
 		Where(orderCols.RechargeId, event.RechargeId).
 		Exist()
@@ -370,7 +377,7 @@ func (s *sOrder) HandlePayment(ctx context.Context, event *mainmodel.ChainPaymen
 			orderCols.OrderNo:              addOrder.OrderNo,
 			orderCols.UserId:               addOrder.UserId,
 			orderCols.PlanId:               addOrder.PlanId,
-			orderCols.Amount:               addOrder.Amount,
+			orderCols.Amount:               round4(addOrder.Amount * quantity),
 			orderCols.PeriodMonths:         plan.PeriodMonths,
 			orderCols.CycleNum:             plan.PeriodMonths * 30,
 			orderCols.EarlyExitPenaltyRate: plan.EarlyExitPenaltyRate,
