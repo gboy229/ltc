@@ -105,6 +105,7 @@ jobs:
           # 生产配置不入包，由服务器自行维护
           rm -f package/manifest/config/config.yaml
           cp deploy/remote-deploy-server.sh package/
+          cp deploy/ltc.service package/
           echo "${{ steps.prefix.outputs.page_prefix }}" > package/page-prefix.txt
           tar -C package -czf hotgo-server.tar.gz .
           ls -lh hotgo-server.tar.gz
@@ -131,6 +132,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
+          timeout: 60s
           source: hotgo-server.tar.gz
           target: /tmp/hotgo-deploy
           overwrite: true
@@ -143,6 +145,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
+          timeout: 60s
           command_timeout: 10m
           script: |
             set -eu

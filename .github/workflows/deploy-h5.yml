@@ -68,6 +68,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
+          timeout: 60s
           source: h5-dist.tar.gz
           target: /tmp/hotgo-h5-deploy
           overwrite: true
@@ -79,6 +80,7 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
+          timeout: 60s
           command_timeout: 5m
           script: |
             set -eu

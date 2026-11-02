@@ -65,9 +65,16 @@ else
   as_root() { sudo -n "$@"; }
 fi
 
-# 切换前先确认服务存在，避免二进制换了却起不来（systemctl show 不需要 root；
-# 查不到状态时跳过，交给后面的 restart 失败回滚兜底）
+# 切换前先确认服务存在；缺失时用部署包里的 unit 自动安装
 if command -v systemctl >/dev/null 2>&1; then
+  SERVICE_FILE="/etc/systemd/system/${SERVICE}.service"
+  if [ ! -f "$SERVICE_FILE" ] && [ -f "$SRC_DIR/ltc.service" ]; then
+    ok "安装 systemd 服务 ${SERVICE}.service"
+    as_root install -m 644 "$SRC_DIR/ltc.service" "$SERVICE_FILE"
+    as_root systemctl enable "$SERVICE" >/dev/null 2>&1 || true
+  fi
+  as_root systemctl daemon-reload
+
   UNIT_STATE="$(systemctl show "$SERVICE" -p LoadState --value 2>/dev/null || true)"
   if [ -n "$UNIT_STATE" ] && [ "$UNIT_STATE" != "loaded" ]; then
     fail "服务器未安装 systemd 服务：${SERVICE}（见 deploy/ltc.service）"
@@ -117,9 +124,12 @@ if [ "$RUN_MENU" = "1" ]; then
   ( cd "$APP_DIR" && "$SRC_DIR/main" menu )
 fi
 
-ok "备份当前二进制到 main.prev"
 if [ -f "$APP_DIR/main" ]; then
+  ok "备份当前二进制到 main.prev"
   as_root cp -f "$APP_DIR/main" "$APP_DIR/main.prev"
+else
+  # 首次部署没有旧二进制，跳过备份即可，不要因此中断部署
+  ok "首次部署：未发现旧二进制，跳过 main.prev 备份"
 fi
 
 ok "切换二进制"
