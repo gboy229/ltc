@@ -7,6 +7,7 @@
 
 export type WalletId =
   | 'metamask'
+  | 'phantom'
   | 'tokenpocket'
   | 'okx'
   | 'bitget'
@@ -21,6 +22,7 @@ export interface Eip1193Provider {
   on?(event: string, listener: ProviderListener): void
   removeListener?(event: string, listener: ProviderListener): void
   isMetaMask?: boolean
+  isPhantom?: boolean
   isTokenPocket?: boolean
   isOkxWallet?: boolean
   isOKExWallet?: boolean
@@ -30,6 +32,12 @@ export interface Eip1193Provider {
   isTrustWallet?: boolean
   isImToken?: boolean
   isImtoken?: boolean
+  /**
+   * Phantom 的多钱包聚合代理会暴露该方法：请求前先弹窗让用户在
+   * Phantom / MetaMask 之间选择，选择失败时抛 “Unexpected error”。
+   * 真实钱包 provider 不带此方法，可据此识别并跳过代理。
+   */
+  selectExtension?: unknown
   providers?: Eip1193Provider[]
   [key: string]: unknown
 }
@@ -71,6 +79,13 @@ export const WALLET_CATALOG: Record<WalletId, WalletMeta> = {
     short: 'M',
     colorClass: 'bg-[#f6851b]',
     downloadUrl: 'https://metamask.io/download/',
+  },
+  phantom: {
+    id: 'phantom',
+    name: 'Phantom',
+    short: 'P',
+    colorClass: 'bg-[#ab9ff2] text-[#1f1a13]',
+    downloadUrl: 'https://phantom.com/download',
   },
   tokenpocket: {
     id: 'tokenpocket',
@@ -118,6 +133,7 @@ export const WALLET_CATALOG: Record<WalletId, WalletMeta> = {
 /** 供“未检测到钱包”弹层展示的安装列表 */
 export const WALLET_LIST: WalletMeta[] = [
   WALLET_CATALOG.metamask,
+  WALLET_CATALOG.phantom,
   WALLET_CATALOG.tokenpocket,
   WALLET_CATALOG.okx,
   WALLET_CATALOG.bitget,
@@ -127,11 +143,12 @@ export const WALLET_LIST: WalletMeta[] = [
 
 const WALLET_RANK: Record<WalletId, number> = {
   metamask: 0,
-  tokenpocket: 1,
-  okx: 2,
-  bitget: 3,
-  trust: 4,
-  imtoken: 5,
+  phantom: 1,
+  tokenpocket: 2,
+  okx: 3,
+  bitget: 4,
+  trust: 5,
+  imtoken: 6,
   injected: 9,
 }
 
@@ -148,6 +165,7 @@ const DEEP_LINKS: Partial<Record<WalletId, (url: string) => string>> = {
 declare global {
   interface Window {
     ethereum?: Eip1193Provider
+    phantom?: { ethereum?: Eip1193Provider }
     okxwallet?: Eip1193Provider
     trustwallet?: Eip1193Provider
     imToken?: Eip1193Provider
@@ -164,6 +182,15 @@ function isProvider(value: unknown): value is Eip1193Provider {
   )
 }
 
+/**
+ * 是否为多钱包聚合代理（目前主要是 Phantom）。
+ * 这类代理的 request 会先弹窗让用户选择扩展，选不出来就抛 “Unexpected error”，
+ * 因此直接使用真实钱包 provider，避免走代理。
+ */
+function isAggregatorProvider(provider: Eip1193Provider): boolean {
+  return typeof provider.selectExtension === 'function'
+}
+
 function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
 }
@@ -173,6 +200,9 @@ function asString(value: unknown): string {
 }
 
 function detectWalletId(provider: Eip1193Provider, rdns?: string): WalletId {
+  if (provider.isPhantom) {
+    return 'phantom'
+  }
   if (provider.isTokenPocket) {
     return 'tokenpocket'
   }
@@ -193,6 +223,7 @@ function detectWalletId(provider: Eip1193Provider, rdns?: string): WalletId {
   }
 
   const key = (rdns || '').toLowerCase()
+  if (key.includes('phantom')) return 'phantom'
   if (key.includes('tokenpocket')) return 'tokenpocket'
   if (key.includes('okx') || key.includes('okex')) return 'okx'
   if (key.includes('bitget') || key.includes('bitkeep')) return 'bitget'
@@ -233,7 +264,13 @@ export async function discoverWallets(timeoutMs = 500): Promise<DiscoveredWallet
       return
     }
 
-    const existing = found.get(provider as Eip1193Provider)
+    const p = provider as Eip1193Provider
+    // 跳过 Phantom 等多钱包聚合代理，改用其真实 provider
+    if (isAggregatorProvider(p)) {
+      return
+    }
+
+    const existing = found.get(p)
     if (existing) {
       if (options.icon) existing.icon = options.icon
       if (options.name) existing.name = options.name
@@ -241,7 +278,6 @@ export async function discoverWallets(timeoutMs = 500): Promise<DiscoveredWallet
       return
     }
 
-    const p = provider as Eip1193Provider
     const id = detectWalletId(p, options.rdns)
     const meta = WALLET_CATALOG[id]
     found.set(p, {
@@ -254,7 +290,10 @@ export async function discoverWallets(timeoutMs = 500): Promise<DiscoveredWallet
     })
   }
 
-  // 1. 传统注入式钱包
+  // 1. Phantom 真实 provider（window.ethereum 可能被它的聚合代理占用）
+  addProvider(window.phantom?.ethereum)
+
+  // 2. 传统注入式钱包
   const injected = window.ethereum
   if (injected) {
     if (Array.isArray(injected.providers) && injected.providers.length > 0) {
@@ -316,16 +355,41 @@ export async function requestAccount(wallet: DiscoveredWallet): Promise<string> 
     }
     return account
   } catch (error) {
-    throw normalizeWalletError(error, '连接钱包失败')
+    const normalized = normalizeWalletError(error, '连接钱包失败')
+    // 部分钱包（尤其内置浏览器）会对 eth_requestAccounts 抛未知错误，
+    // 但账户其实已授权，此时回读 eth_accounts 兜底，避免无法登录
+    if (normalized.code !== 'REJECTED') {
+      const authorized = await getAuthorizedAccounts(wallet.provider)
+      if (authorized[0]) {
+        return authorized[0]
+      }
+    }
+    throw normalized
   }
 }
 
 export async function getChainId(provider: Eip1193Provider): Promise<string> {
   try {
-    return asString(await provider.request({ method: 'eth_chainId' }))
+    const chainId = asString(await provider.request({ method: 'eth_chainId' }))
+    if (chainId) {
+      return chainId
+    }
   } catch {
-    return ''
+    // 尝试下面的兼容方法
   }
+
+  // 少数钱包只实现了 net_version（十进制字符串）
+  try {
+    const networkVersion = asString(await provider.request({ method: 'net_version' }))
+    const numeric = Number.parseInt(networkVersion, 10)
+    if (Number.isFinite(numeric) && numeric > 0) {
+      return `0x${numeric.toString(16)}`
+    }
+  } catch {
+    // 忽略，返回空表示获取失败
+  }
+
+  return ''
 }
 
 function toHexMessage(message: string): string {
@@ -454,6 +518,11 @@ export function normalizeWalletError(error: unknown, fallback = '操作失败'):
     return new WalletError('NO_PROVIDER', '未检测到 Web3 钱包，请使用钱包 App 打开')
   }
 
+  // 部分钱包扩展在多钱包共存时抛出的原生错误，对用户没有指导意义
+  if (/unexpected error|internal error/i.test(rawMessage)) {
+    return new WalletError('UNKNOWN', '钱包请求异常，请刷新页面或更换钱包后重试')
+  }
+
   return new WalletError('UNKNOWN', rawMessage || fallback)
 }
 
@@ -470,45 +539,107 @@ export interface WalletChainConfig {
   blockExplorerUrls: string[]
 }
 
-/** 确保钱包切换到目标链，钱包没有该链时自动添加 */
+/** 钱包“未添加该链”类错误的特征 */
+const UNKNOWN_CHAIN_ERROR =
+  /unrecognized chain|try adding the chain|not added|chain not found|unknown chain|unsupported chain|chain id .*not|未添加|未找到.*链|不支持.*链|链.*不存在/i
+
+function isUserRejection(error: unknown): boolean {
+  const raw = error as { code?: unknown; message?: unknown }
+  const code = typeof raw?.code === 'number' ? raw.code : undefined
+  const message = typeof raw?.message === 'string' ? raw.message : ''
+  return code === 4001 || /reject|denied|cancel|用户取消|用户拒绝/i.test(message)
+}
+
+/** 钱包请求超时保护：部分钱包在弹确认窗后会一直挂起，避免界面无反馈 */
+function withWalletTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new WalletError('UNKNOWN', message))
+    }, timeoutMs)
+
+    promise.then(
+      (value) => {
+        window.clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        window.clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
+/**
+ * 确保钱包切换到目标链。
+ *
+ * 流程：switchEthereumChain → 若钱包没有该链（4902 等）则 addEthereumChain
+ * → 添加完成后再 switchEthereumChain 一次（OKX 等钱包添加后不会自动切换）。
+ */
 export async function ensureWalletChain(
   provider: Eip1193Provider,
   chain: WalletChainConfig,
 ): Promise<void> {
   const chainId = `0x${chain.chainId.toString(16)}`
+  const addParams = [
+    {
+      chainId,
+      chainName: chain.chainName,
+      nativeCurrency: chain.nativeCurrency,
+      rpcUrls: chain.rpcUrls,
+      blockExplorerUrls: chain.blockExplorerUrls,
+    },
+  ]
+  // OKX 官方 dApp 适配器切换网络时带 silent，避免切换确认一直挂起
+  const switchPayload: Record<string, unknown> = { chainId }
+  if (provider.isOkxWallet || provider.isOKExWallet) {
+    switchPayload.silent = true
+  }
+
+  const switchChain = () =>
+    withWalletTimeout(
+      provider.request({ method: 'wallet_switchEthereumChain', params: [switchPayload] }),
+      45_000,
+      '钱包未响应网络切换，请在钱包中手动切换网络',
+    )
 
   try {
-    await provider.request({
-      method: 'wallet_switchEthereumChain',
-      params: [{ chainId }],
-    })
+    await switchChain()
     return
   } catch (error) {
-    const raw = error as { code?: number; message?: string; data?: { originalError?: { code?: number } } }
+    if (isUserRejection(error)) {
+      throw normalizeWalletError(error, '切换钱包网络失败')
+    }
+
+    const raw = error as {
+      code?: number
+      message?: string
+      data?: { originalError?: { code?: number } }
+    }
     const code = raw?.code ?? raw?.data?.originalError?.code
     const message = String(raw?.message || '')
 
-    // 4902：钱包没有该链，需要先 addEthereumChain
-    if (code !== 4902 && !/unrecognized chain|try adding the chain|not added/i.test(message)) {
+    // 只有“钱包没有该链”才进入添加流程，其他错误直接抛出
+    if (code !== 4902 && !UNKNOWN_CHAIN_ERROR.test(message)) {
       throw normalizeWalletError(error, '切换钱包网络失败')
     }
   }
 
   try {
-    await provider.request({
-      method: 'wallet_addEthereumChain',
-      params: [
-        {
-          chainId,
-          chainName: chain.chainName,
-          nativeCurrency: chain.nativeCurrency,
-          rpcUrls: chain.rpcUrls,
-          blockExplorerUrls: chain.blockExplorerUrls,
-        },
-      ],
-    })
+    await withWalletTimeout(
+      provider.request({ method: 'wallet_addEthereumChain', params: addParams }),
+      45_000,
+      '钱包未响应网络添加，请在钱包中手动添加网络',
+    )
   } catch (error) {
     throw normalizeWalletError(error, '添加钱包网络失败')
+  }
+
+  // 添加成功后主动再切一次：部分钱包（OKX）添加网络后仍停留在原链
+  try {
+    await switchChain()
+  } catch (error) {
+    throw normalizeWalletError(error, '切换钱包网络失败')
   }
 }
 
@@ -555,40 +686,132 @@ export async function sendErc20Transfer(
   }
 }
 
-/** 查询 ERC20 余额，返回最小单位 */
+/** 校验 EVM 合约地址 */
+function isValidContractAddress(address: string): boolean {
+  return /^0x[0-9a-fA-F]{40}$/.test(address)
+}
+
+/** 解码 ERC20 balanceOf 返回值（32 字节十六进制） */
+function decodeErc20Balance(result: unknown, contract: string): bigint {
+  if (typeof result !== 'string' || !result.startsWith('0x')) {
+    throw new WalletError('UNKNOWN', '查询 USDT 余额失败')
+  }
+
+  // 0x 表示目标地址没有合约代码，通常是后台配置的合约地址不正确
+  if (result === '0x') {
+    throw new WalletError(
+      'UNKNOWN',
+      `合约 ${contract.slice(0, 6)}...${contract.slice(-4)} 无效，请检查后台链配置`,
+    )
+  }
+
+  try {
+    return BigInt(result)
+  } catch {
+    throw new WalletError('UNKNOWN', '查询 USDT 余额失败')
+  }
+}
+
+/** 通过链节点 RPC 读取余额，作为钱包内置 provider 不可用时的兜底 */
+async function getErc20BalanceViaRpc(
+  rpcUrls: string[],
+  data: string,
+  contract: string,
+): Promise<bigint> {
+  for (const url of rpcUrls) {
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => controller.abort(), 8000)
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'eth_call',
+          params: [{ to: contract, data }, 'latest'],
+        }),
+        signal: controller.signal,
+      })
+      if (!response.ok) {
+        continue
+      }
+      const body = (await response.json()) as { result?: unknown; error?: unknown }
+      if (body.error || typeof body.result !== 'string') {
+        continue
+      }
+      return decodeErc20Balance(body.result, contract)
+    } catch {
+      // 当前 RPC 失败，继续尝试下一个节点
+    } finally {
+      window.clearTimeout(timer)
+    }
+  }
+
+  throw new WalletError('UNKNOWN', '无法连接链节点查询余额，请检查网络')
+}
+
+/**
+ * 查询 ERC20 余额，返回最小单位。
+ *
+ * 优先走钱包 provider；部分钱包内置 provider 不支持 eth_call（或直接抛
+ * “Unexpected error”），此时用后台配置的 RPC 节点兜底。
+ */
 export async function getErc20Balance(
   provider: Eip1193Provider,
   walletAddress: string,
   contract: string,
+  rpcUrls: string[] = [],
 ): Promise<bigint> {
+  if (!isValidContractAddress(contract)) {
+    throw new WalletError('UNKNOWN', '支付合约地址无效，请检查后台链配置')
+  }
+
   const addressWord = walletAddress.toLowerCase().replace(/^0x/, '').padStart(64, '0')
   const data = `0x70a08231${addressWord}`
+  let providerError: unknown
 
   try {
     const result = await provider.request({
       method: 'eth_call',
       params: [{ to: contract, data }, 'latest'],
     })
-    if (typeof result !== 'string' || !result.startsWith('0x')) {
-      throw new WalletError('UNKNOWN', '查询 USDT 余额失败')
-    }
-    if (result === '0x') {
-      return 0n
-    }
-    return BigInt(result)
+    return decodeErc20Balance(result, contract)
   } catch (error) {
-    throw normalizeWalletError(error, '查询 USDT 余额失败')
+    providerError = error
   }
+
+  if (rpcUrls.length > 0) {
+    try {
+      return await getErc20BalanceViaRpc(rpcUrls, data, contract)
+    } catch {
+      // 继续使用下方统一的错误提示
+    }
+  }
+
+  const normalized = normalizeWalletError(providerError, '查询 USDT 余额失败')
+  if (normalized.code === 'REJECTED' || normalized.code === 'NO_PROVIDER') {
+    throw normalized
+  }
+  // 钱包原生错误（如 “Unexpected error”）对用户无意义，统一给出可操作提示
+  if (!/[\u4e00-\u9fa5]/.test(normalized.message)) {
+    throw new WalletError('UNKNOWN', '余额查询失败，请检查钱包网络后重试')
+  }
+  throw normalized
 }
 
 /** 将最小单位格式化为固定小数位，不经过 Number，避免精度丢失 */
 export function formatTokenAmount(raw: bigint, decimals: number, digits = 2): string {
-  if (decimals <= 0) {
+  const precision = Number.isFinite(decimals) ? Math.max(0, Math.trunc(decimals)) : 0
+  if (precision <= 0) {
     return raw.toString()
   }
 
-  const base = 10n ** BigInt(decimals)
+  const base = 10n ** BigInt(precision)
   const integer = raw / base
-  const fraction = (raw % base).toString().padStart(decimals, '0').slice(0, digits).padEnd(digits, '0')
-  return `${integer.toString()}.${fraction}`
+  const fraction = (raw % base)
+    .toString()
+    .padStart(precision, '0')
+    .slice(0, Math.min(digits, precision))
+  return `${integer.toString()}.${fraction.padEnd(digits, '0')}`
 }

@@ -45,6 +45,9 @@ const payAmount = ref(0)
 const toAddress = ref('')
 const balance = ref('--')
 const balanceLoading = ref(false)
+const balanceError = ref('')
+const chainError = ref('')
+const switchingChain = ref(false)
 const chains = computed(() => chainStore.chains)
 const selectedChain = ref<ChainConfig | null>(null)
 
@@ -88,7 +91,13 @@ const balanceText = computed(() => {
   if (!walletOnSelectedChain.value) return '--'
   return balance.value
 })
-
+const balanceHint = computed(() => {
+  if (!selectedChain.value) return '未选择网络'
+  if (!walletOnSelectedChain.value) {
+    return `请将钱包切换到 ${selectedChain.value.chainName}`
+  }
+  return selectedChain.value.chainName
+})
 function syncSelectedChainFromBackend() {
   if (!chains.value.length) {
     selectedChain.value = null
@@ -164,22 +173,56 @@ function ensureSelectedChain() {
   syncSelectedChainFromBackend()
 }
 
+let balanceRequestId = 0
+
+/** 钱包原生错误多为英文，这里只透出可读的中文提示 */
+function readableError(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : ''
+  return message && /[\u4e00-\u9fa5]/.test(message) ? message : fallback
+}
+
 async function refreshBalance() {
+  const requestId = ++balanceRequestId
+  balanceError.value = ''
+  if (walletOnSelectedChain.value) {
+    chainError.value = ''
+  }
+
   const provider = user.provider
   const contract = selectedContract.value
-  if (!props.show || !provider || !user.address || !contract || !walletOnSelectedChain.value) {
+  const chain = selectedChain.value
+
+  if (!props.show || !provider || !user.address || !contract || !chain) {
     balance.value = '--'
+    balanceLoading.value = false
+    return
+  }
+
+  // 钱包链 ID 尚未同步时（如刚连接）先读取一次实际链 ID
+  if (!user.chainId) {
+    await user.syncChainId()
+    if (requestId !== balanceRequestId) return
+  }
+
+  if (!walletOnSelectedChain.value) {
+    balance.value = '--'
+    balanceLoading.value = false
     return
   }
 
   balanceLoading.value = true
   try {
-    const raw = await getErc20Balance(provider, user.address, contract.address)
+    const raw = await getErc20Balance(provider, user.address, contract.address, chain.rpcUrls)
+    if (requestId !== balanceRequestId) return
     balance.value = formatTokenAmount(raw, contract.decimals, 2)
-  } catch {
+  } catch (error) {
+    if (requestId !== balanceRequestId) return
     balance.value = '--'
+    balanceError.value = readableError(error, '余额查询失败，请稍后重试')
   } finally {
-    balanceLoading.value = false
+    if (requestId === balanceRequestId) {
+      balanceLoading.value = false
+    }
   }
 }
 
@@ -189,21 +232,44 @@ async function ensureWalletOnBackendChain() {
   if (!props.show || !user.provider || !selectedChain.value || walletOnSelectedChain.value) {
     return
   }
-  if (autoSwitchChainId === selectedChain.value.chainId) {
+  if (autoSwitchChainId === selectedChain.value.chainId || switchingChain.value) {
     return
   }
 
-  autoSwitchChainId = selectedChain.value.chainId
+  const chain = selectedChain.value
+  autoSwitchChainId = chain.chainId
+  chainError.value = ''
+  switchingChain.value = true
+  console.info('[h5] 尝试切换钱包网络', {
+    wallet: user.walletName || 'unknown',
+    from: user.chainId,
+    to: chain.chainId,
+  })
   try {
-    await ensureWalletChain(user.provider, selectedChain.value)
+    await ensureWalletChain(user.provider, chain)
+    // 部分钱包切换网络后不派发 chainChanged，主动同步一次
+    await user.syncChainId()
+    if (!walletOnSelectedChain.value) {
+      // 钱包返回成功但链没变（部分钱包会忽略切换请求）
+      console.warn('[h5] 钱包未实际切换网络', { from: user.chainId, to: chain.chainId })
+      chainError.value = `请手动把钱包网络切换到 ${chain.chainName}`
+      return
+    }
+    // 切换成功，重置标记，后续手动切走时仍可自动切回
+    autoSwitchChainId = 0
     await refreshBalance()
-  } catch {
+  } catch (error) {
+    console.warn('[h5] 切换钱包网络失败', error)
+    autoSwitchChainId = 0
     balance.value = '--'
+    chainError.value = readableError(error, '切换钱包网络失败')
+  } finally {
+    switchingChain.value = false
   }
 }
 
 watch(
-  [() => props.show, () => user.address, () => user.chainId, selectedChain],
+  [() => props.show, () => user.provider, () => user.address, () => user.chainId, selectedChain],
   () => {
     if (props.show) {
       void ensureWalletOnBackendChain()
@@ -212,6 +278,29 @@ watch(
   },
   { immediate: true },
 )
+
+/** 余额查询失败后的重试：先重试网络切换，再重新查询 */
+async function retryBalance() {
+  autoSwitchChainId = 0
+  await refreshBalance()
+  await ensureWalletOnBackendChain()
+}
+
+/** 手动切换网络（自动切换失败时使用） */
+async function retryChain() {
+  autoSwitchChainId = 0
+  await ensureWalletOnBackendChain()
+  await refreshBalance()
+}
+
+/** 未连接钱包时，引导用户连接/授权 */
+async function connectWallet() {
+  if (!user.provider) {
+    user.openSheet()
+    return
+  }
+  await user.ensureLogin()
+}
 
 async function refreshChainsIfNeeded() {
   if (!user.chainId || !chainStore.chains.length) return
@@ -230,12 +319,16 @@ async function selectChain(chain: ChainConfig) {
     return
   }
 
+  // 先标记，避免 watch 中重复发起切换（钱包并发请求会直接报错）
+  autoSwitchChainId = chain.chainId
+  chainError.value = ''
   try {
     await ensureWalletChain(user.provider, chain)
+    await user.syncChainId()
     await refreshBalance()
   } catch (error) {
-    phase.value = 'failed'
-    errorMessage.value = error instanceof Error ? error.message : '切换钱包网络失败'
+    autoSwitchChainId = 0
+    chainError.value = readableError(error, '切换钱包网络失败')
   }
 }
 
@@ -365,6 +458,7 @@ function close() {
     toAddress.value = ''
   }
   autoSwitchChainId = 0
+  chainError.value = ''
   emit('update:show', false)
 }
 
@@ -384,10 +478,19 @@ watch(
       if (orderNo.value && phase.value === 'confirming') {
         startPolling()
       }
+      if (!chains.value.length) {
+        await chainStore.load()
+      }
       ensureSelectedChain()
       await refreshChainsIfNeeded()
       ensureSelectedChain()
-      await ensureWalletOnBackendChain()
+      // 同步钱包实际网络；余额与网络切换由上方 watch 统一处理
+      await user.syncChainId()
+      // 兜底：若 watch 因防重标记未触发，这里再尝试一次自动切换
+      if (!walletOnSelectedChain.value && !switchingChain.value && !chainError.value) {
+        autoSwitchChainId = 0
+        await ensureWalletOnBackendChain()
+      }
       await nextTick()
       cancelButton.value?.focus()
       return
@@ -489,8 +592,51 @@ onBeforeUnmount(() => {
             <img :src="icon6" alt="" class="h-9 w-9 shrink-0 object-contain" />
             <span class="min-w-0 flex-1">
               <span class="block text-[15px] font-semibold text-[#1f1a13]">USDT 余额</span>
-              <span class="mt-0.5 block text-[11.5px] text-ink-500">
-                {{ selectedChain?.chainName || '未选择网络' }}
+              <button
+                v-if="chainError"
+                type="button"
+                class="mt-0.5 block text-left text-[11.5px] leading-4 text-[#b33a3a]"
+                :title="`${chainError}，点击重试`"
+                @click="retryChain"
+              >
+                {{ chainError }}，点击重试
+              </button>
+              <button
+                v-else-if="balanceError"
+                type="button"
+                class="mt-0.5 block text-left text-[11.5px] leading-4 text-[#b33a3a]"
+                :title="`${balanceError}，点击重试`"
+                @click="retryBalance"
+              >
+                {{ balanceError }}，点击重试
+              </button>
+              <button
+                v-else-if="switchingChain"
+                type="button"
+                disabled
+                class="mt-0.5 block text-left text-[11.5px] leading-4 text-ink-500"
+              >
+                正在请求钱包切换网络...
+              </button>
+              <button
+                v-else-if="!user.provider || !user.address"
+                type="button"
+                class="mt-0.5 block text-left text-[11.5px] leading-4 text-[#a45f1a]"
+                @click="connectWallet"
+              >
+                连接钱包后显示余额
+              </button>
+              <button
+                v-else-if="!walletOnSelectedChain && selectedChain"
+                type="button"
+                class="mt-0.5 block text-left text-[11.5px] leading-4 text-[#a45f1a]"
+                :title="`当前钱包：${user.walletName || '未知'}（${user.chainId || '未知链'}），点击切换`"
+                @click="retryChain"
+              >
+                切换到 {{ selectedChain.chainName }}
+              </button>
+              <span v-else class="mt-0.5 block text-[11.5px] text-ink-500">
+                {{ balanceHint }}
               </span>
             </span>
             <span class="shrink-0 text-right text-[15px] font-bold tabular-nums text-[#a45f1a]">

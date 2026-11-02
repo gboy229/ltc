@@ -318,6 +318,16 @@ export const useUserStore = defineStore('user', () => {
     return wallets.value
   }
 
+  /** 重新读取钱包当前链 ID（部分钱包切换网络后不会派发 chainChanged） */
+  async function syncChainId(): Promise<string> {
+    if (!provider.value) {
+      chainId.value = ''
+      return ''
+    }
+    chainId.value = await getChainId(provider.value)
+    return chainId.value
+  }
+
   /**
    * 应用启动时自动连接钱包并登录。
    * - 已有有效会话：静默恢复，不弹签名
@@ -493,6 +503,7 @@ export const useUserStore = defineStore('user', () => {
     ensureLogin,
     signAction,
     refreshWallets,
+    syncChainId,
     openSheet,
     closeSheet,
     switchWallet,
