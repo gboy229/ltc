@@ -58,24 +58,13 @@ func (q *qScanTransfer) Handle(ctx context.Context, mqMsg queue.MqMsg) (err erro
 		return nil
 	}
 
-	// 2. 只处理平台收款地址的转账
-	configCols := dao.ChainConfig.Columns()
-	var cfg *entity.ChainConfig
-	if err = dao.ChainConfig.Ctx(ctx).Where(configCols.Chain, event.Chain).Scan(&cfg); err != nil {
-		return gerror.Wrap(err, "查询链配置失败")
+	// 2. 只处理 pledge 插件配置的入金地址
+	depositAddress, configErr := isc.SysAddonsConfig().GetConfigByKey(ctx, "pledge", "depositAddress")
+	if configErr != nil {
+		return gerror.Wrap(configErr, "读取 pledge 入金地址失败")
 	}
-	if cfg == nil {
-		return nil
-	}
-
-	// 平台收款地址：pledge 配置的 depositAddress 优先，兼容 chain_config.transfer_address
-	matched := cfg.TransferAddress != "" && strings.EqualFold(cfg.TransferAddress, event.To)
-	if !matched {
-		if depositAddress, cacheErr := isc.SysAddonsConfig().GetConfigByKey(ctx, "pledge", "depositAddress"); cacheErr == nil {
-			matched = depositAddress != "" && strings.EqualFold(depositAddress, event.To)
-		}
-	}
-	if !matched {
+	depositAddress = strings.TrimSpace(depositAddress)
+	if depositAddress == "" || !strings.EqualFold(depositAddress, event.To) {
 		return nil
 	}
 
@@ -86,10 +75,14 @@ func (q *qScanTransfer) Handle(ctx context.Context, mqMsg queue.MqMsg) (err erro
 	}
 	amount := decimal.NewFromBigInt(rawAmount, -int32(event.Decimals))
 
-	// 4. 付款地址反查用户ID，查不到也落库，但业务侧不会自动匹配
-	uid, cacheErr := getWalletUserId(ctx, event.From)
-	if cacheErr != nil {
-		g.Log().Warningf(ctx, "查询钱包用户缓存失败, from:%s err:%+v", event.From, cacheErr)
+	// 4. 付款地址反查用户ID：查不到直接忽略，不落库
+	uid, lookupErr := getWalletUserId(ctx, event.From)
+	if lookupErr != nil {
+		return gerror.Wrap(lookupErr, "查询钱包用户失败")
+	}
+	if uid <= 0 {
+		//g.Log().Warningf(ctx, "付款地址未绑定用户，忽略充值: from:%s tx:%s", event.From, event.TxHash)
+		return nil
 	}
 
 	// 5. 充值记录幂等：hash + log_index

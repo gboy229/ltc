@@ -58,14 +58,18 @@ ADMIN_DIR="$SERVER_DIR/resource/public${PAGE_PREFIX}"
 ok "页面前缀：${PAGE_PREFIX}"
 ok "1/3 安装并构建后台前端"
 cd "$WEB_DIR"
-# 本地已有依赖时跳过安装：pnpm 可能因 store 路径变化想重建 node_modules，
-# 非交互环境会直接报错。CI 上 node_modules 不存在，会正常安装。
-if [[ "${FORCE_INSTALL:-0}" == "1" || ! -d "$WEB_DIR/node_modules" ]]; then
-  pnpm install --frozen-lockfile
+if [[ "${SKIP_WEB_BUILD:-0}" == "1" && -f "$WEB_DIR/dist/index.html" ]]; then
+  ok "使用缓存的前端产物，跳过 pnpm 安装/构建"
 else
-  ok "检测到 node_modules，跳过安装（需要重装请用 FORCE_INSTALL=1）"
+  # 本地已有依赖时跳过安装：pnpm 可能因 store 路径变化想重建 node_modules，
+  # 非交互环境会直接报错。CI 上 node_modules 不存在，会正常安装。
+  if [[ "${FORCE_INSTALL:-0}" == "1" || ! -d "$WEB_DIR/node_modules" ]]; then
+    pnpm install --frozen-lockfile
+  else
+    ok "检测到 node_modules，跳过安装（需要重装请用 FORCE_INSTALL=1）"
+  fi
+  pnpm build
 fi
-pnpm build
 
 [[ -f "$WEB_DIR/dist/index.html" ]] || fail "前端构建失败：缺少 web/dist/index.html"
 

@@ -11,7 +11,7 @@ gfcli:
     packDst: "internal/packed/packed.go"   # 打包后生成的Go文件路径，一般使用相对路径指定到本项目目录中
     version: ""
     output: "./temp/hotgo"                 # 可执行文件生成路径
-    extra: ""
+    extra: '-ldflags="-s -w"'              # 去掉符号表和调试信息，二进制约小 25%，上传更快
 
 
   docker:

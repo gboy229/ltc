@@ -149,7 +149,7 @@ sudo nginx -t && sudo systemctl reload nginx
 
 1. `web` 安装依赖并构建，产物拷到 `server/resource/public/<页面前缀>`
 2. `gf build` 把 `resource` 打进二进制
-3. 输出 `server/temp/hotgo`（linux/amd64，约 81MB；部署时重命名为 `main`）
+3. 输出 `server/temp/hotgo`（linux/amd64，约 60MB；已用 `-s -w` 裁剪，部署时重命名为 `main`）
 
 > 构建机需要：Node 20.19+、pnpm 10、Go 1.25+、gf CLI。
 > 没装 gf：`cd server && make cli`。
@@ -162,7 +162,7 @@ sudo nginx -t && sudo systemctl reload nginx
 ```text
 ==> 构建完成
 产物：.../server/temp/hotgo
-大小：81M
+大小：约 60M
 ...: ELF 64-bit LSB executable, x86-64 ...
 ```
 
@@ -283,7 +283,7 @@ location = /secret/ {
 |---|---|---|
 | `server/**`、`web/**` | `deploy-server.yml` | 构建后台前端 + 二进制 → 上传 → 切换 → 重启 → 健康检查 |
 | `h5/**` | `deploy-h5.yml` | 构建 h5 → 上传 → 替换 `/opt/www/h5`（**不重启 Go**） |
-| 只改 `*.md`、`deploy/` 下文档 | 不触发 | 需要时在 Actions 页面手动 `Run workflow` |
+| 只改 `deploy/` 下脚本或 `*.md` | 不触发 | 需要时在 Actions 页面手动 `Run workflow` |
 | 打 tag `v*` | `release.yml` | 构建并创建 Release，**不部署** |
 
 > `web/**` 必须触发服务端部署：后台页面会被 `gf build` 打进 Go 二进制，只传 dist 不生效。

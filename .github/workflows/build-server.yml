@@ -53,12 +53,27 @@ jobs:
           go-version: "1.25"
           cache-dependency-path: server/go.sum
 
-      # 版本与 server/go.mod 对齐，避免 gf CLI 与项目框架版本不一致
+      # 版本与 server/go.mod 对齐；优先下载官方二进制，失败再回退到 go install
       - name: 安装 gf CLI
         run: |
-          GOBIN="$HOME/go/bin" go install github.com/gogf/gf/cmd/gf/v2@v2.10.3
+          V=2.10.3
+          mkdir -p "$HOME/go/bin"
+          if curl -fsSL --retry 3 -o "$HOME/go/bin/gf" \
+            "https://github.com/gogf/gf/releases/download/v${V}/gf_linux_amd64"; then
+            chmod +x "$HOME/go/bin/gf"
+          else
+            echo "下载 gf 失败，改用 go install"
+            GOBIN="$HOME/go/bin" go install "github.com/gogf/gf/cmd/gf/v2@v${V}"
+          fi
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
           "$HOME/go/bin/gf" -v
+
+      - name: 恢复前端构建产物
+        id: webcache
+        uses: actions/cache@v4
+        with:
+          path: web/dist
+          key: web-dist-${{ hashFiles('web/**', 'web/.env.production') }}
 
       - name: 读取页面前缀
         id: prefix
@@ -71,8 +86,9 @@ jobs:
           echo "页面前缀：$PREFIX"
 
       - name: 构建（前端 + 单文件二进制）
+        env:
+          SKIP_WEB_BUILD: ${{ steps.webcache.outputs.cache-hit == 'true' && '1' || '0' }}
         run: |
-          cd server && go mod download && cd ..
           chmod +x deploy/build.sh
           ./deploy/build.sh
           ls -lh server/temp/hotgo
