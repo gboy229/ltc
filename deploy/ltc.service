@@ -4,9 +4,11 @@ After=network.target mysql.service redis-server.service
 
 [Service]
 Type=simple
-# 如果服务器上没有 www-data（CentOS 常见），改成 nginx 或 nobody，并同步 chown 目录
-User=www-data
-Group=www-data
+# 直接以 root 运行，避免切换运行用户后 logs/storage/session 权限问题。
+# 如需降权：改成 User=www / Group=www，并执行：
+#   chown -R www:www /opt/ltc/{logs,storage,resource/public/attachment}
+User=root
+Group=root
 WorkingDirectory=/opt/ltc
 ExecStart=/opt/ltc/main
 Restart=always

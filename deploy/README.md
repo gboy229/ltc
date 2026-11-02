@@ -113,6 +113,8 @@ sudo systemctl daemon-reload
 sudo systemctl enable ltc        # 只设置开机自启，先不启动
 ```
 
+> `deploy/ltc.service` 默认 `User=root`，避免日志/上传目录权限问题。要降权就改成 `www` 并 chown 对应目录。
+
 敏感变量写到 `/opt/ltc/.env`：
 
 ```bash
@@ -209,9 +211,9 @@ sudo nginx -t && sudo systemctl reload nginx
 ssh root@你的服务器IP
 cd /opt/ltc
 
-sudo -u www-data ./main migrate    # 建表
-sudo -u www-data ./main seed       # 种子数据（默认管理员 admin / 123456）
-sudo -u www-data ./main menu       # 同步菜单
+sudo ./main migrate    # 建表
+sudo ./main seed       # 种子数据（默认管理员 admin / 123456）
+sudo ./main menu       # 同步菜单
 
 sudo systemctl start ltc
 ```
@@ -364,9 +366,9 @@ CI 只负责「传包 + 重启」，下面这些仍要手动做一次：
 
 ```bash
 cd /opt/ltc
-sudo -u www-data ./main migrate
-sudo -u www-data ./main seed     # 只执行一次
-sudo -u www-data ./main menu
+sudo ./main migrate
+sudo ./main seed     # 只执行一次
+sudo ./main menu
 sudo systemctl enable --now ltc
 ```
 
@@ -391,8 +393,8 @@ CI **不会**执行 `migrate`，只更新二进制并重启。版本包含表结
 ```bash
 ssh root@服务器
 cd /opt/ltc
-sudo -u www-data ./main migrate
-sudo -u www-data ./main menu        # 菜单有变动时
+sudo ./main migrate
+sudo ./main menu        # 菜单有变动时
 ```
 
 也可以在 Actions → deploy-server → Run workflow 时勾选 `migrate`。
@@ -448,7 +450,7 @@ curl -s http://127.0.0.1:8000/mMe6PXqfRLhjWCiK/index.html | grep -o 'assets/inde
 ### 4.4 日志/上传目录没权限
 
 ```bash
-sudo chown -R www-data:www-data /opt/ltc/{logs,storage,resource}
+sudo chown -R root:root /opt/ltc/{logs,storage,resource}
 ```
 
 ### 4.5 执行命令提示找不到 config
@@ -472,7 +474,7 @@ h5 是 History 路由，必须在 nginx 配 `try_files $uri $uri/ /index.html;`�
   默认会保留新版本（只告警），修好后重新 push；想自动回滚就设 `STRICT_HEALTH_CHECK=1`；
 - **缺少配置**：确认 `/opt/ltc/manifest/config/config.yaml` 已存在、`ltc.service` 已安装；
 - **h5 健康检查失败**：确认 nginx 已配置 `root /opt/www/h5`，必要时设置变量 `H5_CHECK_URL`；
-- **迁移没跑**：CI 默认只更新二进制，表结构变更要手动 `cd /opt/ltc && sudo -u www-data ./main migrate`。
+- **迁移没跑**：CI 默认只更新二进制，表结构变更要手动 `cd /opt/ltc && sudo ./main migrate`。
 
 ### 4.8 服务启动失败：status=217/USER
 

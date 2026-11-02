@@ -128,6 +128,16 @@ as_root chmod 0755 "$APP_DIR/main.new"
 as_root mv -f "$APP_DIR/main.new" "$APP_DIR/main"
 chown_app "$APP_DIR/main"
 
+# 切换运行用户后 logs/storage 可能还是旧用户所有，导致启动 panic
+ok "修正运行目录权限"
+as_root mkdir -p "$APP_DIR/logs" "$APP_DIR/storage" "$APP_DIR/resource/public/attachment"
+as_root chown -R "$APP_USER" "$APP_DIR/logs" "$APP_DIR/storage" "$APP_DIR/resource/public/attachment" 2>/dev/null || true
+
+# /tmp/gsessions 可能由旧运行用户创建，chown 一下避免 session 不可写
+if [ -d /tmp/gsessions ]; then
+  as_root chown -R "$APP_USER" /tmp/gsessions 2>/dev/null || true
+fi
+
 ok "重启服务"
 if ! as_root systemctl restart "$SERVICE"; then
   printf '\033[1;31mERROR:\033[0m 服务启动失败，开始回滚\n' >&2
