@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { formatAmount } from '@/utils/format'
@@ -13,7 +13,6 @@ import myBg2 from '@/assets/images/my_bg2.png'
 import levelBg from '@/assets/images/side/level_bg.png'
 import AppHeader from '@/components/AppHeader.vue'
 import PageHeading from '@/components/PageHeading.vue'
-import { shortenAddress } from '@/utils/address'
 import { useUserStore } from '@/stores/user'
 import { getTeamPush, type TeamMember } from '@/api/users/team'
 import { getOrderStatistics } from '@/api/pledge'
@@ -22,7 +21,7 @@ import { toast } from '@/utils/toast'
 
 const router = useRouter()
 const user = useUserStore()
-const { uid, levelName, address } = storeToRefs(user)
+const { uid, levelName } = storeToRefs(user)
 
 const members = ref<TeamMember[]>([])
 const directCount = ref(0)
@@ -68,10 +67,20 @@ function goBack() {
   void router.push('/')
 }
 
-async function copyInviteAddress() {
-  if (!address.value) return
-  const copied = await copyText(address.value)
-  toast(copied ? '邀请地址已复制' : '复制失败，请手动复制', copied ? 'success' : 'error')
+// 邀请链接：打开站点首页并通过 ?uid= 记录邀请人，注册时自动绑定
+const inviteLink = computed(() => {
+  if (!uid.value) {
+    return ''
+  }
+  const link = new URL(import.meta.env.BASE_URL || '/', window.location.origin)
+  link.searchParams.set('uid', uid.value)
+  return link.toString()
+})
+
+async function copyInviteLink() {
+  if (!inviteLink.value) return
+  const copied = await copyText(inviteLink.value)
+  toast(copied ? '邀请链接已复制' : '复制失败，请手动复制', copied ? 'success' : 'error')
 }
 
 async function copyInviteCode() {
@@ -203,14 +212,14 @@ function viewAllMembers() {
               <path d="M13.5 10.5a4 4 0 0 0-5.7 0l-2.3 2.3a4 4 0 0 0 5.7 5.7l1.3-1.3" />
             </svg>
           </span>
-          <span class="shrink-0 text-[13px] text-ink-500 max-[359px]:text-[12px]">邀请地址：</span>
+          <span class="shrink-0 text-[13px] text-ink-500 max-[359px]:text-[12px]">邀请链接：</span>
           <span class="min-w-0 flex-1 truncate text-[13.5px] font-medium text-ink-900 max-[359px]:text-[12.5px]">
-            {{ shortenAddress(address || '') }}
+            {{ inviteLink }}
           </span>
           <button
             type="button"
             class="flex h-7 shrink-0 items-center gap-1 rounded-full bg-gradient-to-r from-[#e7c07a] to-[#c9954a] px-2.5 text-[11.5px] font-medium text-white shadow-sm transition active:scale-[0.98] max-[359px]:h-6 max-[359px]:gap-0.5 max-[359px]:px-2 max-[359px]:text-[11px]"
-            @click="copyInviteAddress"
+            @click="copyInviteLink"
           >
             <svg
               viewBox="0 0 24 24"
