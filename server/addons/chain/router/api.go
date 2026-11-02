@@ -22,6 +22,7 @@ func Api(ctx context.Context, group *ghttp.RouterGroup) {
 		group.Bind(
 			// 无需验证的路由
 			api.Config,
+			api.Balance, // 链上余额查询（只读）
 		)
 		group.Middleware(service.Middleware().ApiAuth)
 		group.Bind(

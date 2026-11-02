@@ -18,6 +18,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"hotgo/internal/library/queue"
 
@@ -335,7 +336,18 @@ type RPCResponse struct {
 func (ea *EthereumAdapter) GetTokenBalance(address, tokenAddress string, decimal int) (float64, error) {
 	var amount float64
 
-	address = "0x70a08231000000000000000000000000" + address[2:]
+	if ea.nodeURL == "" {
+		return amount, fmt.Errorf("node url is empty")
+	}
+	if !common.IsHexAddress(address) {
+		return amount, fmt.Errorf("invalid wallet address: %s", address)
+	}
+	if !common.IsHexAddress(tokenAddress) {
+		return amount, fmt.Errorf("invalid token address: %s", tokenAddress)
+	}
+
+	// balanceOf(address) 的 calldata：4 字节选择器 + 32 字节右对齐地址
+	data := "0x70a08231" + strings.Repeat("0", 24) + strings.ToLower(strings.TrimPrefix(address, "0x"))
 
 	// 构建请求
 	request := RPCRequest{
@@ -344,7 +356,7 @@ func (ea *EthereumAdapter) GetTokenBalance(address, tokenAddress string, decimal
 		Params: []interface{}{
 			map[string]interface{}{
 				"to":   tokenAddress,
-				"data": address,
+				"data": data,
 			},
 			"latest",
 		},
@@ -356,7 +368,7 @@ func (ea *EthereumAdapter) GetTokenBalance(address, tokenAddress string, decimal
 		return amount, err
 	}
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 10 * time.Second}
 
 	// 发送 HTTP POST 请求
 	resp, err := client.Post(ea.nodeURL, "application/json", bytes.NewBuffer(reqBody))
@@ -380,11 +392,16 @@ func (ea *EthereumAdapter) GetTokenBalance(address, tokenAddress string, decimal
 
 	// 检查是否有错误
 	if rpcResponse.Error != nil {
-		return amount, errors.New(fmt.Sprintf("%s [Method]", rpcResponse.Error.Message))
+		return amount, fmt.Errorf("%s [Method]", rpcResponse.Error.Message)
+	}
+	if rpcResponse.Result == "" || rpcResponse.Result == "0x" {
+		return amount, fmt.Errorf("empty balance result from token contract: %s", tokenAddress)
 	}
 
-	number := new(big.Int)
-	number.SetString(strings.TrimPrefix(strings.ToLower(rpcResponse.Result), "0x"), 16)
+	number, ok := new(big.Int).SetString(strings.TrimPrefix(strings.ToLower(rpcResponse.Result), "0x"), 16)
+	if !ok {
+		return amount, fmt.Errorf("invalid balance result: %s", rpcResponse.Result)
+	}
 
 	amount, _ = utility.ToDecimal(number.String(), decimal).Float64()
 

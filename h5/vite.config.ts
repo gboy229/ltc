@@ -9,6 +9,10 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [vue()],
+    define: {
+      // 便于确认线上实际运行的构建版本
+      __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+    },
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),

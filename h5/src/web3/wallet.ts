@@ -718,9 +718,20 @@ async function getErc20BalanceViaRpc(
   data: string,
   contract: string,
 ): Promise<bigint> {
+  const failures: string[] = []
+
   for (const url of rpcUrls) {
+    let host = url
+    try {
+      host = new URL(url).host
+    } catch {
+      // 非法 URL 时保留原始地址
+    }
+
     const controller = new AbortController()
     const timer = window.setTimeout(() => controller.abort(), 8000)
+    let result: unknown
+
     try {
       const response = await fetch(url, {
         method: 'POST',
@@ -734,21 +745,38 @@ async function getErc20BalanceViaRpc(
         signal: controller.signal,
       })
       if (!response.ok) {
+        failures.push(`${host}: HTTP ${response.status}`)
         continue
       }
-      const body = (await response.json()) as { result?: unknown; error?: unknown }
-      if (body.error || typeof body.result !== 'string') {
+      const body = (await response.json()) as {
+        result?: unknown
+        error?: { message?: string }
+      }
+      if (body.error) {
+        failures.push(`${host}: ${body.error.message || 'RPC 返回错误'}`)
         continue
       }
-      return decodeErc20Balance(body.result, contract)
-    } catch {
-      // 当前 RPC 失败，继续尝试下一个节点
+      result = body.result
+    } catch (error) {
+      const reason =
+        error instanceof Error
+          ? error.name === 'AbortError'
+            ? '请求超时'
+            : error.message
+          : '请求失败'
+      failures.push(`${host}: ${reason}`)
+      continue
     } finally {
       window.clearTimeout(timer)
     }
+
+    return decodeErc20Balance(result, contract)
   }
 
-  throw new WalletError('UNKNOWN', '无法连接链节点查询余额，请检查网络')
+  throw new WalletError(
+    'UNKNOWN',
+    failures.length ? `链节点查询失败（${failures.join('；')}）` : '无法连接链节点查询余额',
+  )
 }
 
 /**
@@ -784,8 +812,24 @@ export async function getErc20Balance(
   if (rpcUrls.length > 0) {
     try {
       return await getErc20BalanceViaRpc(rpcUrls, data, contract)
-    } catch {
-      // 继续使用下方统一的错误提示
+    } catch (rpcError) {
+      const rpcMessage = rpcError instanceof Error ? rpcError.message : ''
+      const normalized = normalizeWalletError(providerError, '查询 USDT 余额失败')
+      const providerMessage = normalized.message || '未知错误'
+
+      if (normalized.code === 'REJECTED' || normalized.code === 'NO_PROVIDER') {
+        throw normalized
+      }
+
+      // 合约地址等明确业务错误直接透出
+      if (/合约 .* 无效|支付合约地址无效/.test(providerMessage)) {
+        throw normalized
+      }
+
+      throw new WalletError(
+        'UNKNOWN',
+        `余额查询失败（钱包：${providerMessage}${rpcMessage ? `；RPC：${rpcMessage}` : ''}）`,
+      )
     }
   }
 

@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 
 import buyBg from '@/assets/images/buy_bg.png'
 import icon6 from '@/assets/images/icon6.png'
-import type { ChainConfig, ChainContract } from '@/api/chain'
+import { getChainBalance, type ChainConfig, type ChainContract } from '@/api/chain'
 import { buyPlan, getBuyOrderStatus, type BuyOrderStatusRes } from '@/api/pledge'
 import { useChainStore } from '@/stores/chain'
 import { useUserStore } from '@/stores/user'
@@ -211,14 +211,40 @@ async function refreshBalance() {
   }
 
   balanceLoading.value = true
+  let serverError: unknown
+
   try {
+    // 优先走服务端查询：浏览器无法访问 RPC（内网节点/跨域/CSP）时仍然可用
+    try {
+      const result = await getChainBalance({ address: user.address, chain: chain.chain })
+      if (requestId !== balanceRequestId) return
+      balance.value = formatAmount(result.amount, 2)
+      return
+    } catch (error) {
+      serverError = error
+    }
+
     const raw = await getErc20Balance(provider, user.address, contract.address, chain.rpcUrls)
     if (requestId !== balanceRequestId) return
     balance.value = formatTokenAmount(raw, contract.decimals, 2)
   } catch (error) {
     if (requestId !== balanceRequestId) return
     balance.value = '--'
-    balanceError.value = readableError(error, '余额查询失败，请稍后重试')
+    console.warn('[h5] 余额查询失败', {
+      wallet: user.walletName || 'unknown',
+      chainId: user.chainId,
+      contract: contract.address,
+      serverError,
+      error,
+    })
+    const walletMessage = error instanceof Error ? error.message : ''
+    const serverMessage = serverError instanceof Error ? serverError.message : ''
+    balanceError.value =
+      walletMessage && /[\u4e00-\u9fa5]/.test(walletMessage)
+        ? walletMessage
+        : serverMessage
+          ? `余额查询失败（${serverMessage}）`
+          : '余额查询失败，请稍后重试'
   } finally {
     if (requestId === balanceRequestId) {
       balanceLoading.value = false
@@ -478,9 +504,8 @@ watch(
       if (orderNo.value && phase.value === 'confirming') {
         startPolling()
       }
-      if (!chains.value.length) {
-        await chainStore.load()
-      }
+      // 每次打开都拉取最新链配置，后台修改链/合约后无需整页刷新
+      await chainStore.load(true)
       ensureSelectedChain()
       await refreshChainsIfNeeded()
       ensureSelectedChain()

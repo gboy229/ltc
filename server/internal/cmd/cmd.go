@@ -38,6 +38,7 @@ var (
 		>> 释放casbin权限，用于清理无效的权限设置  [go run main.go tools -m=casbin -a1=refresh]
 		>> 打印所有打包的资源文件列表  [go run main.go tools -m=gres -a1=dump]
 		>> 打印指定打包的资源文件内容  [go run main.go tools -m=gres -a1=content -a2=resource/template/home/index.html]
+		>> 修改后台账号密码，-u指定账号、-i指定账号ID，不传-p自动生成复杂密码  [go run main.go passwd -u=admin]
 		---------------------------------------------------------------------------------
 		升级更新
 		>> 修复菜单关系树  [go run main.go up -m=fix -a1=menuTree]
@@ -85,7 +86,7 @@ var (
 )
 
 func init() {
-	if err := Main.AddCommand(All, Http, Queue, Cron, Auth, Tools, Up, Migrate, Seed, Menu, Help); err != nil {
+	if err := Main.AddCommand(All, Http, Queue, Cron, Auth, Tools, Passwd, Up, Migrate, Seed, Menu, Help); err != nil {
 		panic(err)
 	}
 }

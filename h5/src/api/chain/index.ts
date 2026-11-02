@@ -30,3 +30,17 @@ export interface ChainConfigRes {
 export function getChainConfig() {
   return http.get<ChainConfigRes>('/chain/config', undefined, { silent: true })
 }
+
+export interface ChainBalanceRes {
+  chain: string
+  symbol: string
+  address: string
+  contract: string
+  decimals: number
+  amount: number
+}
+
+/** 服务端查询钱包代币余额（避免浏览器无法访问 RPC） */
+export function getChainBalance(params: { address: string; chain?: string; symbol?: string }) {
+  return http.get<ChainBalanceRes>('/chain/balance', params, { silent: true })
+}

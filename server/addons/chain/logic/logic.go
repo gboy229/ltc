@@ -5,6 +5,7 @@
 package logic
 
 import (
+	_ "hotgo/addons/chain/logic/balance"
 	_ "hotgo/addons/chain/logic/config"
 	_ "hotgo/addons/chain/logic/sys"
 	_ "hotgo/addons/chain/logic/withdrawal"
