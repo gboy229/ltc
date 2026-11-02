@@ -4,6 +4,7 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import router from './router'
 import { clearAuthStorage } from './utils/auth'
+import { disablePageZoom } from './utils/disableZoom'
 
 import './styles/index.css'
 
@@ -13,6 +14,9 @@ if (typeof window !== 'undefined') {
   window.__H5_BUILD__ = BUILD_TIME
   console.info('[h5] build', BUILD_TIME)
 }
+
+// H5 作为 App 使用，禁止浏览器双指/滚轮缩放页面
+disablePageZoom()
 
 // 切换后端环境后，旧 token / 钱包地址属于旧环境，自动清理
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'

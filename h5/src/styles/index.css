@@ -12,6 +12,12 @@
     -webkit-tap-highlight-color: transparent;
   }
 
+  html,
+  body {
+    /* 禁止双指缩放和双击缩放，保留页面滚动 */
+    touch-action: pan-x pan-y;
+  }
+
   body {
     @apply min-h-screen bg-[#e9ddca] font-sans text-ink-900 antialiased;
     overscroll-behavior-y: none;
